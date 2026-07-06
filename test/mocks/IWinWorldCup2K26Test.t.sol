@@ -155,7 +155,7 @@ IWin = new IWinWorldCup2K26(
      IWin.requestMatchResult(1);
      _returnReport(1, 1, 1);
      vm.prank(user3);
-     vm.expectRevert(IWinWorldCup2K26.MatchCanceled.selector);
+     vm.expectRevert(IWinWorldCup2K26.CanceledMatch.selector);
      IWin.placeBet{value: 2 ether}(1, 1);
 
    }
@@ -311,7 +311,7 @@ IWin = new IWinWorldCup2K26(
      IWin.requestMatchResult(1);
      _returnReport(1, 3, 1);
      vm.prank(user);
-     vm.expectRevert(IWinWorldCup2K26.MatchCanceled.selector);
+     vm.expectRevert(IWinWorldCup2K26.CanceledMatch.selector);
      IWin.claimWinnings(1);
 
    }
@@ -740,6 +740,48 @@ function testWrongChainSelectorFails() public {
     vm.prank(user);
     IWin.onReport(metadata, report);
  }
+ function testCancelIfResultUnavailableAfterResultTimeOutSucceeds() public {
+   IWin.addFixture("KCCA", "Vipers", "12345", 20 minutes, 100 minutes );
+    vm.prank(user);
+     IWin.createBet{value: 3 ether}(1, 2);
+     vm.prank(user2);
+     IWin.placeBet{value: 2 ether}(1, 3);
+     uint256 end = IWin.getMatchEnd(1);
+     vm.warp(end + 1); 
+     IWin.requestMatchResult(1);
+     vm.warp(end + 3 hours);
+     vm.prank(user);
+     IWin.cancelIfResultUnavailable(1);
+      assertEq(IWin.isMatchCanceled(1), true);
+ }
+ function testCancelIfResultUnavailableBeforeResultTimeOutFails() public {
+   IWin.addFixture("KCCA", "Vipers", "12345", 20 minutes, 100 minutes );
+    vm.prank(user);
+     IWin.createBet{value: 3 ether}(1, 2);
+     vm.prank(user2);
+     IWin.placeBet{value: 2 ether}(1, 3);
+     uint256 end = IWin.getMatchEnd(1);
+     vm.warp(end + 1); 
+     IWin.requestMatchResult(1);
+     vm.expectRevert(IWinWorldCup2K26. GracePeriodNotElapsed.selector);
+     vm.prank(user);
+     IWin.cancelIfResultUnavailable(1);
+  }
+  function testEventMatchCanceledEmits() public {
+    IWin.addFixture("KCCA", "Vipers", "12345", 20 minutes, 100 minutes );
+    vm.prank(user);
+     IWin.createBet{value: 3 ether}(1, 2);
+     vm.prank(user2);
+     IWin.placeBet{value: 2 ether}(1, 3);
+     uint256 end = IWin.getMatchEnd(1);
+     vm.warp(end + 1); 
+     IWin.requestMatchResult(1);
+     vm.warp(end + 3 hours);
+     vm.expectEmit(true, true, false, true);
+     emit IWinWorldCup2K26.MatchCanceled(1);
+     vm.prank(user);
+     IWin.cancelIfResultUnavailable(1);
+}
 }
 
  

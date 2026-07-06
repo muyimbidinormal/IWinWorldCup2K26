@@ -39,6 +39,7 @@ contract IWinWorldCup2K26 is ReentrancyGuard, ReceiverTemplate {
     uint256 public feeBasisPoints = 1000; // 10%
     uint64 public immutable chainSelector;
 
+    uint256 public constant RESULT_TIMEOUT = 2 hours;
     uint256 public userBetCount;
     uint256 public fixtureCount;
     error InvalidWinner();
@@ -57,7 +58,7 @@ contract IWinWorldCup2K26 is ReentrancyGuard, ReceiverTemplate {
     error BettingClosed();
     error MatchHasEnded();
     ///Check Refund.
-    error MatchCanceled();
+    error CanceledMatch();
     ///Results already requested;
     error ResultsRequested();
     error MatchHasNotEnded();
@@ -88,6 +89,7 @@ contract IWinWorldCup2K26 is ReentrancyGuard, ReceiverTemplate {
     error BettingNotClosed();
     error InvalidChain();
     error ReplayAttack();
+    error GracePeriodNotElapsed();
 
     event BetCreated(uint256 indexed betId, address indexed creator, uint256 escrowedAmount);
     event BetPlaced(uint256 indexed betId, address indexed bettor, uint256 amount);
@@ -100,6 +102,7 @@ contract IWinWorldCup2K26 is ReentrancyGuard, ReceiverTemplate {
         uint256 indexed fixtureId, string indexed teamA, string indexed teamB, uint256 bettingDeadline, uint256 matchEnd
     );
     event ResultRequestedForCRE(uint256 indexed betId, uint256 indexed fixtureId, string externalApiId);
+    event MatchCanceled(uint256 indexed betId);
 
 constructor(
     address _keystoneForwarder,
@@ -184,7 +187,7 @@ constructor(
         require(outcome >= 1 && outcome <= 3, InvalidOutcomeValues());
         Bet storage m = userBets[_betId];
         require(m.exists, BetDoesNOTExist());
-        require(!m.canceled, MatchCanceled());
+        require(!m.canceled, CanceledMatch());
         require(!m.resultRequested, ResultsRequested());
         require(block.timestamp < m.bettingDeadline, BettingClosed());
         require(!m.bettingClosed, BettingClosed());
@@ -202,7 +205,7 @@ constructor(
         require(m.exists, BetDoesNOTExist());
         require(!m.resultRequested, ResultsRequested());
         require(!m.bettingClosed, BettingClosed());
-        require(!m.canceled, MatchCanceled());
+        require(!m.canceled, CanceledMatch());
         Fixture storage f = fixtures[m.fixtureId];
         require(f.exists, MatchDoesNOTExist());
         require(block.timestamp > f.matchEnd, MatchHasNotEnded());
@@ -269,6 +272,7 @@ finalizeMatchResult(
 
         if (totalWinnerPool == 0 || totalLoserPool == 0) {
             m.canceled = true;
+            emit MatchCanceled(_betId);
         }
 
         emit ResultReceived(_betId, winner);
@@ -280,7 +284,7 @@ finalizeMatchResult(
         require(m.exists, BetDoesNOTExist());
         require(m.bettingClosed, BettingNotClosed());
         require(m.winner == 1 || m.winner == 2 || m.winner == 3, ResultsNotReturned());
-        require(!m.canceled, MatchCanceled());
+        require(!m.canceled, CanceledMatch());
         require(!m.claimed[msg.sender], AlreadyClaimed());
         uint256 betAmount;
         betAmount = (m.winner == 1)
@@ -321,6 +325,25 @@ finalizeMatchResult(
         (bool success,) = payable(owner()).call{value: amountToWithdraw}("");
         require(success, ContractFeesPaymentFailed());
     }
+    
+
+function cancelIfResultUnavailable(uint256 betId) external {
+    require(betId > 0, FieldsRequired());
+    Bet storage b = userBets[betId];
+    require(b.exists, BetDoesNOTExist());
+    Fixture storage f = fixtures[b.fixtureId];
+
+    require(b.winner == 0, ResultAlreadySet());
+
+    require(
+        block.timestamp > f.matchEnd + RESULT_TIMEOUT,
+        GracePeriodNotElapsed()
+    );
+
+    b.canceled = true;
+
+    emit MatchCanceled(betId);
+}
 
     function getProtocolFees() external view  returns (uint256 _protocolFee) {
         _protocolFee = protocolFee;
@@ -435,6 +458,12 @@ finalizeMatchResult(
         Bet storage m = userBets[_betId];
         require(m.exists, BetDoesNOTExist());
         return m.resultRequested;
+    }
+    function isMatchCanceled(uint256 _betId) external view returns (bool canceled) {
+        require(_betId > 0, FieldsRequired());
+        Bet storage m = userBets[_betId];
+        require(m.exists, BetDoesNOTExist());
+        return m.canceled;
     }
 
     receive() external payable {}
